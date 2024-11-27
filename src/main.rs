@@ -2,52 +2,26 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Neg;
 
-use clap::Parser;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_dft::Radix2DitParallel;
 use p3_field::{AbstractField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
-use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger32};
-// use p3_circle::CirclePcs;
+use p3_challenger::{HashChallenger, SerializingChallenger32};
+use p3_circle::CirclePcs;
 use p3_commit::ExtensionMmcs;
 use p3_field::extension::BinomialExtensionField;
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::FriConfig;
 use p3_keccak::Keccak256Hash;
 use p3_merkle_tree::FieldMerkleTreeMmcs;
-// use p3_mersenne_31::Mersenne31;
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher32, TruncatedPermutation};
+use p3_mersenne_31::Mersenne31;
+use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
 use p3_uni_stark::{prove, verify, StarkConfig};
-use rand::thread_rng;
-use sp1_core_executor::SP1Context;
-use sp1_core_machine::io::SP1Stdin;
-use sp1_primitives::RC_16_30;
-use sp1_prover::components::DefaultProverComponents;
-use sp1_prover::SP1Prover;
-use sp1_stark::baby_bear_poseidon2::BabyBearPoseidon2;
-use sp1_stark::{SP1ProverOpts, UniConfig};
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
-use serde::ser::Serialize;
-use p3_symmetric::Hash;
-
-// use serde::Serialize;
-use serde_json;
-
-#[derive(Parser)]
-pub struct Cli {
-    #[arg(short, long, default_value_t = 1)]
-    programs: u8,
-
-    #[arg(short, long, default_value_t = 1)]
-    repetitions: u16,
-}
 
 #[derive(Clone, Copy, Debug)]
 pub enum I64MathOps {
@@ -55,28 +29,6 @@ pub enum I64MathOps {
     Sub,
     Mul,
 }
-
-pub type Val = BabyBear;
-pub type Challenge = BinomialExtensionField<Val, 4>;
-
-pub type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>;
-pub type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
-pub type DigestHash = Hash<Val, Val, 8>;
-pub type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
-pub type ValMmcs = FieldMerkleTreeMmcs<
-    <Val as Field>::Packing,
-    <Val as Field>::Packing,
-    MyHash,
-    MyCompress,
-    8,
->;
-pub type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-pub type Dft = Radix2DitParallel;
-pub type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
-type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
-
-pub const RANDOMX_ELF: &[u8] = include_bytes!("../../fluence-randomx-4-sp1/elf/riscv32im-succinct-zkvm-elf");
-
 
 // 1 instr cnt + 10 ops flags + 8 arg1 + 8 arg2 + 8 res + 7 carry
 const BIN_OP_ROW_SIZE: usize = 42;
@@ -339,24 +291,25 @@ impl<AB: AirBuilder> Air<AB> for ProgExec<AB::F> {
     }
 }
 
-pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> RowMajorMatrix<F> {
-    let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * prog.ops.len() * cli.repetitions as usize);
+pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>) -> RowMajorMatrix<F> {
+    let progs_num = 8;
+    let repetitions = 2048;
+    let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * prog.ops.len() * repetitions);
 
-    for _ in 0..cli.programs {
-        for _ in 0..cli.repetitions {
+    // for _ in 0..progs_num {
+        // for _ in 0..repetitions {
             for op in prog.ops.iter_mut() {
-                    let mut next_record = op.generate(&mut prog.regs, &mut values);
-                    values.append(&mut next_record);
+                let mut next_record = op.generate(&mut prog.regs, &mut values);
+                // println!("generate_program_trace next_record: {:?}", next_record);
+                values.append(&mut next_record);
             }
-        }
-    }
+        // }
+    // }
     
     RowMajorMatrix::new(values, BIN_OP_ROW_SIZE)
 }
 
 fn main() -> Result<(), impl Debug> {
-    let cli = Cli::parse();
-    
     let env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
@@ -365,6 +318,42 @@ fn main() -> Result<(), impl Debug> {
         .with(env_filter)
         .with(ForestLayer::default())
         .init();
+
+    type Val = Mersenne31;
+    type Challenge = BinomialExtensionField<Val, 3>;
+
+    type ByteHash = Keccak256Hash;
+    type FieldHash = SerializingHasher32<ByteHash>;
+    let byte_hash = ByteHash {};
+    let field_hash = FieldHash::new(Keccak256Hash {});
+
+    type MyCompress = CompressionFunctionFromHasher<u8, ByteHash, 2, 32>;
+    let compress = MyCompress::new(byte_hash);
+
+    type ValMmcs = FieldMerkleTreeMmcs<Val, u8, FieldHash, MyCompress, 32>;
+    let val_mmcs = ValMmcs::new(field_hash, compress);
+
+    type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
+    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+
+    type Challenger = SerializingChallenger32<Val, HashChallenger<u8, ByteHash, 32>>;
+
+    let fri_config = FriConfig {
+        log_blowup: 1,
+        num_queries: 100,
+        proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    };
+
+    type Pcs = CirclePcs<Val, ValMmcs, ChallengeMmcs>;
+    let pcs = Pcs {
+        mmcs: val_mmcs,
+        fri_config,
+        _phantom: PhantomData,
+    };
+
+    type MyConfig = StarkConfig<Pcs, Challenge, Challenger>;
+    let config = MyConfig::new(pcs);
 
     let add_op = I64MathOp::<Val> {
         op: I64MathOps::Add,
@@ -404,34 +393,11 @@ fn main() -> Result<(), impl Debug> {
     }
 
     let mut air = ProgExec { ops, regs };
-    let trace = generate_program_trace::<Val>(&mut air, &cli);
+    let trace = generate_program_trace::<Val>(&mut air);
 
-    // let config = default_fri_config();
-    let config = UniConfig(BabyBearPoseidon2::new());
-
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    let mut challenger = Challenger::new(config.0.perm.clone());
+    let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let proof = prove(&config, &air, &mut challenger, trace, &vec![]);
-    // println!("proof len {:#?}", serde_json::to_string(&proof).unwrap());
 
-    // let prover = SP1Prover::<DefaultProverComponents>::new();
-    // let (pk, vk) = prover.setup(RANDOMX_ELF);
-
-    // let opts = SP1ProverOpts::default();
-
-    // let context = SP1Context::default();
-    // let micro_cache = vec![42u8; 10];
-    // let mut stdin = SP1Stdin::new();
-    // stdin.write_vec(micro_cache.clone());
-    // stdin.write_slice(&micro_cache);
-
-    // // // let _ = prover.execute(RANDOMX_ELF, &stdin, context.clone());
-
-    // let core_proof = prover.prove_core(&pk, &stdin, opts, context).unwrap();
-    // println!("core_proof {:#?}", core_proof.proof.0[0].commitment);
-    // println!("core_proof {:#?}", core_proof.proof.0[1].commitment);
-
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    let mut challenger = Challenger::new(config.0.perm.clone());
+    let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     verify(&config, &air, &mut challenger, &proof, &vec![])
 }
