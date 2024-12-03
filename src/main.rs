@@ -18,14 +18,16 @@ use p3_poseidon2::Poseidon2;
 
 use std::io::Write;
 
-use p3_field::FieldAlgebra;
+// use p3_field::FieldAlgebra;
 use p3_mersenne_31::Mersenne31;
 use p3_uni_stark::{prove, verify};
 use prog_exec::{generate_program_trace, ProgExec};
 use recursive_prover::{generate_recursive_proover_trace, RecursiveProver};
 use register::{init_regs, RegFile};
 // use stark_primitives::{default_stark_config, ByteHash, Challenger, WrapChallenger, BIN_OP_ROW_SIZE};
-use stark_primitives::{default_stark_config, ByteHash, Challenger};
+use stark_primitives::{
+    default_stark_config, outer_perm, wrap_stark_config, BabyBearPoseidon2, ByteHash, Challenger, OuterChallenger, OuterPerm
+};
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -81,12 +83,14 @@ fn main() -> Result<(), impl Debug> {
     let byte_hash = ByteHash {};
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let proof = prove(&config, &randomx_air, &mut challenger, trace, &vec![]);
-    println!("Proof commitments: {:#?}", serde_json::to_string(&proof).unwrap().len());
+    // println!(
+    //     "Proof commitments: {:#?}",
+    //     serde_json::to_string(&proof).unwrap().len()
+    // );
 
-    let mut file = File::create("long.proof").expect("Could not create file!");
-    file.write_all(serde_json::to_string_pretty(&proof).unwrap().as_bytes())
-        .expect("Cannot write to the file!");
-
+    // let mut file = File::create("long.proof").expect("Could not create file!");
+    // file.write_all(serde_json::to_string_pretty(&proof).unwrap().as_bytes())
+    //     .expect("Cannot write to the file!");
 
     // println!("Proof commitments: {:#?}", proof.commitments);
     // println!("Proof opened_values: {:#?}", proof.opened_values);
@@ -97,30 +101,48 @@ fn main() -> Result<(), impl Debug> {
 
     verify(&config, &randomx_air, &mut challenger, &proof, &vec![])?;
 
+    // WIP rename this
     let mut wrap_prover = RecursiveProver::<Val>::new();
-    let mut wrap_challenger = Challenger::from_hasher(vec![], byte_hash);
-    let rec_trace = generate_recursive_proover_trace(&mut wrap_prover, &randomx_air, &cli, &config, &mut wrap_challenger, &proof, &vec![]);
 
-
-    // let mut rng = rand::thread_rng();
-    // let mut wrap_perm = Poseidon2::new_from_rng(8, 22,& mut rng);
-    // let mut wrap_challenger = WrapChallenger::new(wrap_perm);
-    // let wrap_config = wrap_perm_stark_config();
-
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    // change config to recursive
-    // change challenger to recursive
-    // let mut wrap_challenger:
-    // type RecChallenger = MultiField32Challenger<Mersenne31, Bn254Fr, Poseidon2<Bn254Fr, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBN254, 3, 5>, 3, 2>;
-    // pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
-    let rec_proof = prove(&config, &wrap_prover, &mut wrap_challenger, rec_trace, &vec![]);
-    println!("Proof commitments: {:#?}", serde_json::to_string(&rec_proof).unwrap().len());
-
-    let mut file = File::create("short.proof").expect("Could not create file!");
-    file.write_all(serde_json::to_string_pretty(&rec_proof).unwrap().as_bytes())
-        .expect("Cannot write to the file!");
-    
+    // let mut wrap_challenger = Challenger::from_hasher(vec![], byte_hash);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    // CirclePcs::verify
-    verify(&config, &wrap_prover, &mut challenger, &rec_proof, &vec![])
+
+    let rec_trace = generate_recursive_proover_trace::<_,_,BabyBearPoseidon2>(
+        &mut wrap_prover,
+        &randomx_air,
+        &cli,
+        &config,
+        &mut challenger,
+        &proof,
+        &vec![],
+    );
+
+    let wrap_config = wrap_stark_config();
+    let wrap_perm = outer_perm();
+    let mut wrap_challenger = OuterChallenger::new(wrap_perm.clone()).unwrap();
+
+    let rec_proof = prove(
+        &wrap_config,
+        &wrap_prover,
+        &mut wrap_challenger,
+        rec_trace,
+        &vec![],
+    );
+    // println!(
+    //     "Proof commitments: {:#?}",
+    //     serde_json::to_string(&rec_proof).unwrap().len()
+    // );
+
+    // let mut file = File::create("short.proof").expect("Could not create file!");
+    // file.write_all(serde_json::to_string_pretty(&rec_proof).unwrap().as_bytes())
+    //     .expect("Cannot write to the file!");
+
+    let mut wrap_challenger = OuterChallenger::new(wrap_perm).unwrap();
+    verify(
+        &wrap_config,
+        &wrap_prover,
+        &mut wrap_challenger,
+        &rec_proof,
+        &vec![],
+    )
 }

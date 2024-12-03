@@ -1,7 +1,7 @@
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_field::FieldAlgebra;
+use p3_field::AbstractField;
 
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
 
@@ -28,7 +28,7 @@ impl<AB: AirBuilder> Air<AB> for ProgExec<AB::F> {
 
         builder
             .when_transition()
-            .assert_eq(next[0], local[0] + AB::Expr::ONE);
+            .assert_eq(next[0], local[0] + AB::Expr::one());
 
         for op in self.ops.iter() {
             op.eval(builder);

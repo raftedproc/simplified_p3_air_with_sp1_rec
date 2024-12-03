@@ -4,24 +4,29 @@ use p3_challenger::CanSample;
 use p3_challenger::FieldChallenger;
 use p3_commit::Pcs;
 use p3_commit::PolynomialSpace;
+use p3_field::AbstractExtensionField;
 use p3_field::Field;
-use p3_field::FieldAlgebra;
-use p3_field::FieldExtensionAlgebra;
+// use p3_field::FieldAlgebra;
+// use p3_field::FieldExtensionAlgebra;
 use p3_matrix::dense::RowMajorMatrixView;
 use p3_matrix::stack::VerticalPair;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_uni_stark::get_log_quotient_degree;
 use p3_uni_stark::Domain;
-use p3_uni_stark::PcsError;
+// use p3_uni_stark::PcsError;
 use p3_uni_stark::SymbolicAirBuilder;
 use p3_uni_stark::VerificationError;
 use p3_uni_stark::VerifierConstraintFolder;
 use p3_uni_stark::{Proof, StarkGenericConfig};
+use p3_field::AbstractField;
 
 use itertools::Itertools;
 
+use crate::stark_primitives::outer_perm;
+use crate::stark_primitives::wrap_stark_config;
 use crate::stark_primitives::ByteHash;
 use crate::stark_primitives::Challenger;
+use crate::stark_primitives::OuterChallenger;
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
 
 // #[derive(Clone, Debug)]
@@ -66,14 +71,13 @@ impl<AB: AirBuilder> Air<AB> for RecursiveProver<AB::F> {
         // }
     }
 }
-
 pub fn verify_<SC, A>(
     config: &SC,
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
     public_values: &Vec<p3_uni_stark::Val<SC>>,
-) -> Result<(), VerificationError<PcsError<SC>>>
+) -> Result<(), VerificationError>
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<p3_uni_stark::Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
@@ -96,27 +100,19 @@ where
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
     let air_width = <A as BaseAir<p3_uni_stark::Val<SC>>>::width(air);
+    // println!("air_width: {:?}", air_width);
     let valid_shape = opened_values.trace_local.len() == air_width
         && opened_values.trace_next.len() == air_width
         && opened_values.quotient_chunks.len() == quotient_degree
         && opened_values
             .quotient_chunks
             .iter()
-            .all(|qc| qc.len() == <SC::Challenge as FieldExtensionAlgebra<p3_uni_stark::Val<SC>>>::D);
+            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<p3_uni_stark::Val<SC>>>::D);
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
 
-    // Observe the instance.
-    challenger.observe(p3_uni_stark::Val::<SC>::from_canonical_usize(proof.degree_bits));
-    // TODO: Might be best practice to include other instance data here in the transcript, like some
-    // encoding of the AIR. This protects against transcript collisions between distinct instances.
-    // Practically speaking though, the only related known attack is from failing to include public
-    // values. It's not clear if failing to include other instance data could enable a transcript
-    // collision, since most such changes would completely change the set of satisfying witnesses.
-
     challenger.observe(commitments.trace.clone());
-    challenger.observe_slice(public_values);
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 
@@ -147,7 +143,7 @@ where
         opening_proof,
         challenger,
     )
-    .map_err(VerificationError::InvalidOpeningArgument)?;
+    .map_err(|_| VerificationError::InvalidOpeningArgument)?;
 
     let zps = quotient_chunks_domains
         .iter()
@@ -191,7 +187,7 @@ where
         is_last_row: sels.is_last_row,
         is_transition: sels.is_transition,
         alpha,
-        accumulator: SC::Challenge::ZERO,
+        accumulator: SC::Challenge::zero(),
     };
     air.eval(&mut folder);
     let folded_constraints = folder.accumulator;
@@ -205,33 +201,37 @@ where
     Ok(())
 }
 
-pub fn generate_recursive_proover_trace<A, SC>(
+pub fn generate_recursive_proover_trace<A, SC, OSC>(
     // prog: &mut RecursiveProver<F>,
     air: &mut RecursiveProver<p3_uni_stark::Val<SC>>,
     recursive_air: &A,
-    cli: &Cli,
+    _cli: &Cli,
     config: &SC,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
     public_values: &Vec<p3_uni_stark::Val<SC>>,
-) -> RowMajorMatrix<p3_uni_stark::Val<SC>>
+) -> RowMajorMatrix<p3_uni_stark::Val<OSC>>
 where
     SC: StarkGenericConfig,
+    OSC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<p3_uni_stark::Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    // let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * prog * cli.repetitions as usize);
+    let wrap_config = wrap_stark_config();
+    let wrap_perm = outer_perm();
+    let mut wrap_challenger = OuterChallenger::new(wrap_perm.clone()).unwrap();
+
     verify_(config, recursive_air, challenger, proof, public_values).unwrap();
 
     let mut values = vec![];
     for _ in 0..4 {
-        values.push(p3_uni_stark::Val::<SC>::from_canonical_u32(air.cnt));
-        values.push(p3_uni_stark::Val::<SC>::ONE);
-        values.push(p3_uni_stark::Val::<SC>::ONE);
-        values.push(p3_uni_stark::Val::<SC>::ONE);
+        values.push(p3_uni_stark::Val::<OSC>::from_canonical_u32(air.cnt));
+        values.push(p3_uni_stark::Val::<OSC>::one());
+        values.push(p3_uni_stark::Val::<OSC>::one());
+        values.push(p3_uni_stark::Val::<OSC>::one());
         air.cnt += 1;
     }
 
-    println!("values: {:?}", values);
+    // println!("values: {:?}", values);
     // let mut next_record = op.generate(&mut prog.regs, &mut values);
     // values.append(&mut next_record);
 
