@@ -216,6 +216,7 @@ where
     OSC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<p3_uni_stark::Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
+    // WIP To be used in the future
     let wrap_config = wrap_stark_config();
     let wrap_perm = outer_perm();
     let mut wrap_challenger = OuterChallenger::new(wrap_perm.clone()).unwrap();
