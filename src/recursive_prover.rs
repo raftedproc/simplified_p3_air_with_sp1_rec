@@ -24,8 +24,8 @@ use itertools::Itertools;
 
 use crate::stark_primitives::outer_perm;
 use crate::stark_primitives::wrap_stark_config;
-use crate::stark_primitives::ByteHash;
-use crate::stark_primitives::Challenger;
+// use crate::stark_primitives::ByteHash;
+// use crate::stark_primitives::Challenger;
 use crate::stark_primitives::OuterChallenger;
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
 
@@ -238,3 +238,4 @@ where
 
     RowMajorMatrix::new(values, 4)
 }
+
