@@ -1,46 +1,35 @@
 mod math_ops;
 mod prog_exec;
-// mod recursive_prover;
 mod register;
 mod stark_primitives;
 
-// use std::error::Error;
-// use std::fmt::Debug;
+use ff::derive::bitvec::vec;
+use hashbrown::HashMap;
+use stark_primitives::InnerBabyBearPoseidon2;
 use std::fs::File;
 
 use clap::Parser;
 use math_ops::{test_add, test_sub};
-// use p3_air::{Air, AirBuilder, BaseAir};
-// use p3_challenger::MultiField32Challenger;
-// use p3_field::Field;
-// use p3_matrix::dense::RowMajorMatrix;
-// use p3_matrix::Matrix;
-// use p3_poseidon2::Poseidon2;
-// use sp1_core_executor::SP1ReduceProof;
+use p3_baby_bear::BabyBear;
+use p3_field::AbstractField;
 use sp1_prover::components::DefaultProverComponents;
 use sp1_prover::SP1Prover;
-// use sp1_sdk::SP1PublicValues;
-use sp1_stark::{inner_perm, BabyBearPoseidon2Inner, InnerChallenger, InnerPerm, SP1ProverOpts};
+use sp1_stark::{
+    inner_perm, BabyBearPoseidon2Inner, InnerChallenger, SP1ProverOpts, ShardCommitment,
+    ShardOpenedValues, ShardProof,
+};
 
 use std::io::Write;
 
-// use p3_field::FieldAlgebra;
-// use p3_mersenne_31::Mersenne31;
 use p3_uni_stark::{prove, verify, VerificationError};
 use prog_exec::{generate_program_trace, ProgExec};
-// use recursive_prover::{generate_recursive_proover_trace, RecursiveProver};
 use register::init_regs;
-// use stark_primitives::{default_stark_config, ByteHash, Challenger, WrapChallenger, BIN_OP_ROW_SIZE};
-// use stark_primitives::{
-//     default_stark_config, outer_perm, wrap_stark_config, BabyBearPoseidon2, ByteHash, Challenger, InnerBabyBearPoseidon2, OuterChallenger, OuterPerm
-// };
+
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
-
-use stark_primitives::InnerBabyBearPoseidon2;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -63,10 +52,6 @@ fn main() -> Result<(), VerificationError> {
         .with(ForestLayer::default())
         .init();
 
-    // let config = default_stark_config();
-    let inner = BabyBearPoseidon2Inner::default();
-    let config = InnerBabyBearPoseidon2::new(inner.pcs);
-
     let add_op = test_add();
     let sub_op = test_sub();
 
@@ -77,55 +62,42 @@ fn main() -> Result<(), VerificationError> {
 
     let mut ops = vec![];
 
-    for i in 0..256 {
-        if i % 2 == 0 {
-            ops.push(add_op);
-        } else {
-            ops.push(sub_op);
+    for _ in 0..1 {
+        for _ in 0..1 {
+            for i in 0..256 {
+                if i % 2 == 0 {
+                    ops.push(add_op);
+                } else {
+                    ops.push(sub_op);
+                }
+            }
         }
     }
 
     let mut randomx_air = ProgExec { ops, regs };
     let trace = generate_program_trace(&mut randomx_air, &cli);
-    // let byte_hash = ByteHash {};
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
 
     let perm = inner_perm();
     let mut challenger = InnerChallenger::new(perm.clone());
-    // let mut challenger = MultiField32Challenger::new();
-    let proof = prove(&config, &randomx_air, &mut challenger, trace, &vec![]);
+    let inner = BabyBearPoseidon2Inner::default();
+    let config = InnerBabyBearPoseidon2::new(inner.pcs);
 
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
+    let p3_proof = prove(&config, &randomx_air, &mut challenger, trace, &vec![]);
+
+
     let mut challenger = InnerChallenger::new(perm.clone());
-    verify(&config, &randomx_air, &mut challenger, &proof, &vec![])?;
-
-    // WIP rename this
-    // let mut wrap_prover = RecursiveProver::<Val>::new();
-
-    // let mut wrap_challenger = Challenger::from_hasher(vec![], byte_hash);
-    // let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-
-    // let rec_trace = generate_recursive_proover_trace::<_,_,BabyBearPoseidon2>(
-    //     &mut wrap_prover,
-    //     &randomx_air,
-    //     &cli,
-    //     &config,
-    //     &mut challenger,
-    //     &proof,
-    //     &vec![],
-    // );
+    verify(&config, &randomx_air, &mut challenger, &p3_proof, &vec![])?;
 
     let prover = SP1Prover::<DefaultProverComponents>::new();
     let opts = SP1ProverOpts::default();
-    // let reduce_proof = SP1ReduceProof { vk: prover.vk(), proof };
 
-    let input = vec![0; 32];
-    let outer_proof = prover.wrap_bn254_(input, opts).unwrap();
+    let input_proof = vec![0;32];
+    let outer_proof = prover.wrap_bn254_(input_proof, opts).unwrap();
 
-    println!(
-        "wrapped_bn254 {:?}",
-        serde_json::to_string(&outer_proof.proof).unwrap().len()
-    );
+    // println!(
+    //     "wrapped_bn254 {:?}",
+    //     serde_json::to_string(&outer_proof.proof).unwrap().len()
+    // );
 
     let groth16_bn254_artifacts = if sp1_prover::build::sp1_dev_mode() {
         sp1_prover::build::try_build_groth16_bn254_artifacts_dev(
@@ -136,43 +108,13 @@ fn main() -> Result<(), VerificationError> {
         sp1_sdk::install::try_install_circuit_artifacts("groth16")
     };
 
-    // let groth16_bn254_artifacts = sp1_sdk::install::try_install_circuit_artifacts("groth16");
-
-    let wrapped_bn254_proof = prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-    let mut file = File::create("groth16.proof").expect("Could not create file!");
-    file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
+    let groth16_proof = prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+    let mut file = File::create("groth16_proof.json").expect("Could not create file!");
+    file.write_all(serde_json::to_string_pretty(&groth16_proof).unwrap().as_bytes())
         .expect("Cannot write to the file!");
 
     // vk from the initial setup
-    prover.verify_groth16_bn254_(&wrapped_bn254_proof,  &groth16_bn254_artifacts).unwrap();
+    prover.verify_groth16_bn254_(&groth16_proof,  &groth16_bn254_artifacts).unwrap();
 
-    // let wrap_config = wrap_stark_config();
-    // let wrap_perm = outer_perm();
-    // let mut wrap_challenger = OuterChallenger::new(wrap_perm.clone()).unwrap();
-
-    // let rec_proof = prove(
-    //     &wrap_config,
-    //     &wrap_prover,
-    //     &mut wrap_challenger,
-    //     rec_trace,
-    //     &vec![],
-    // );
-    // println!(
-    //     "Proof commitments: {:#?}",
-    //     serde_json::to_string(&rec_proof).unwrap().len()
-    // );
-
-    // let mut file = File::create("short.proof").expect("Could not create file!");
-    // file.write_all(serde_json::to_string_pretty(&rec_proof).unwrap().as_bytes())
-    //     .expect("Cannot write to the file!");
-
-    // let mut wrap_challenger = OuterChallenger::new(wrap_perm).unwrap();
-    // verify(
-    //     &wrap_config,
-    //     &wrap_prover,
-    //     &mut wrap_challenger,
-    //     &rec_proof,
-    //     &vec![],
-    // )
     Ok(())
 }

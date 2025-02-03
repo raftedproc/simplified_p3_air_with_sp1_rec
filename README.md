@@ -1,6 +1,7 @@
-# RandomX program execution implementation in Plonky3
+# RandomX hash generation execution proved with SP1/Plonky3
 
-This repo implements a RandomX program execution and prover using the Plonky3 framework to generate/check execution of RandomX algo.
+Rudimentary RandomX program execution proving implementation using SP1 and Plonky3 frameworks. 
+In a nutshell produces execution STARK proof with P3 and then uses recursive engine of SP1 to wrap the prove into Groth16 STARK.
 
 This version uses Gnark to wrap STARK into Groth16, so to run this version one needs Go compiler available.
 

@@ -1,4 +1,4 @@
-use std::ops::Neg;
+use std::{marker::PhantomData, ops::Neg};
 
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::Field;
@@ -6,7 +6,7 @@ use p3_matrix::Matrix;
 use p3_field::AbstractField;
 
 
-use crate::{register::RegFile, stark_primitives::{BIN_OP_ROW_SIZE, CARRY, CARRY_START, LEFT_ARG, RESULT, RIGHT_ARG, WORD_SIZE}};
+use crate::{register::RegFile, stark_primitives::{BIN_OP_ROW_SIZE, CARRY, CARRY_START, LEFT_ARG, RESULT, RIGHT_ARG}};
 
 #[derive(Clone, Copy, Debug)]
 pub enum I64MathOps {
@@ -20,11 +20,10 @@ pub struct I64MathOp<T> {
     pub op: I64MathOps,
     pub left_arg: i64,
     pub right_arg: i64,
-    pub res: [T; WORD_SIZE],
-    pub carry: [T; CARRY],
     pub left_reg_idx: u8,
     pub right_reg_idx: u8,
     pub res_reg_idx: u8,
+    pub _u: PhantomData<T>,
 }
 
 impl<F: Field> BaseAir<F> for I64MathOp<F> {
@@ -106,11 +105,8 @@ impl<AB: AirBuilder> Air<AB> for I64MathOp<AB::F> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        match self.op {
-            I64MathOps::Add => eval_add(builder, local[1]),
-            I64MathOps::Sub => eval_add(builder, local[2]),
-            I64MathOps::Mul => todo!(),
-        }
+        eval_add(builder, local[1]);
+        eval_add(builder, local[2]);
     }
 }
 
@@ -210,11 +206,10 @@ pub fn test_add<Val: Field>() -> I64MathOp<Val> {
         op: I64MathOps::Add,
         left_arg: 0,
         right_arg: 1,
-        carry: [Val::zero(); 7],
-        res: [Val::zero(); 8],
         left_reg_idx: 0,
         right_reg_idx: 1,
         res_reg_idx: 0,
+        _u: PhantomData,
     }
 }
 
@@ -223,10 +218,9 @@ pub fn test_sub<Val: Field>() -> I64MathOp<Val> {
         op: I64MathOps::Sub,
         left_arg: 0,
         right_arg: 1,
-        carry: [Val::zero(); 7],
-        res: [Val::zero(); 8],
         left_reg_idx: 0,
         right_reg_idx: 1,
         res_reg_idx: 0,
+        _u: PhantomData,
     }
 }

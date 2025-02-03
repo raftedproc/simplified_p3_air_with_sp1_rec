@@ -111,5 +111,6 @@ itertools = "0.13.0"
 zkhash = "0.2.0"
 ff = "0.13.0"
 anyhow = "1.0.94"
+hashbrown = "0.14.5"
 #ff = "0.13.0"
 
