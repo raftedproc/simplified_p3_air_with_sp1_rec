@@ -2,10 +2,11 @@ use std::sync::atomic::AtomicU64;
 
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_baby_bear::BabyBear;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_field::AbstractField;
-use sp1_stark::{inner_perm, BabyBearPoseidon2Inner, InnerChallenger};
+use sp1_core_executor::{ExecutionRecord, Program};
+use sp1_stark::{air::MachineAir, inner_perm, BabyBearPoseidon2Inner, InnerChallenger};
 use p3_uni_stark::prove;
 
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::{InnerBabyBearPoseidon2, BIN_OP_ROW_SIZE}, Cli};
@@ -52,4 +53,27 @@ pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> Ro
     }
     
     RowMajorMatrix::new(values, BIN_OP_ROW_SIZE)
+}
+
+impl<F: PrimeField> MachineAir<F> for ProgExec<F> {
+    type Record = ExecutionRecord;
+
+    type Program = Program;
+    
+    fn name(&self) -> String {
+        "ProgExec".to_string()
+    }
+    
+    fn generate_trace(&self, _input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
+        todo!()
+    }
+    
+    fn included(&self, _shard: &Self::Record) -> bool {
+        todo!()
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        BIN_OP_ROW_SIZE
+    }
+
 }
