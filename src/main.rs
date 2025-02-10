@@ -129,8 +129,6 @@ fn p3_proof_to_shardproof(
         degree_bits,
     );
 
-    println!("P3 degree_bits {}", degree_bits);
-
     let shard_proof = ShardProof {
         commitment: ShardCommitment {
             global_main_commit: [BabyBear::zero(); sp1_stark::DIGEST_SIZE].into(),
@@ -215,7 +213,6 @@ fn main() -> Result<(), VerificationError> {
 
     let mut challenger = InnerChallenger::new(perm.clone());
     verify(&config, &prox_exec, &mut challenger, &p3_proof, &vec![])?;
-    println!("degree bits {}", p3_proof.degree_bits);
 
     // println!(
     //     "p3_proof {}",
@@ -241,10 +238,10 @@ fn main() -> Result<(), VerificationError> {
     let machine_proof = MachineProof {
         shard_proofs: core_proofdata.0.to_vec(),
     };
-    let chip = Chip::new_(prox_exec, log_quotient_degree);
     let mut challenger = InnerChallenger::new(perm.clone());
+    let chip = &machine.chips()[0];
     machine
-        .verify_(&vk, &machine_proof, &chip, &mut challenger)
+        .verify_(&vk, &machine_proof, chip, &mut challenger)
         .unwrap();
 
     // prover.verify_(&core_proofdata, &chip, &sp1vk).unwrap();
