@@ -1,18 +1,11 @@
-use std::sync::atomic::AtomicU64;
-
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_baby_bear::BabyBear;
 use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_field::AbstractField;
 use sp1_core_executor::{ExecutionRecord, Program};
-use sp1_stark::{air::MachineAir, inner_perm, BabyBearPoseidon2Inner, InnerChallenger};
-use p3_uni_stark::prove;
+use sp1_stark::air::MachineAir;
 
-use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::{InnerBabyBearPoseidon2, BIN_OP_ROW_SIZE}, Cli};
-
-pub static mut CNT: AtomicU64 = AtomicU64::new(0);
-pub static mut CNT_OPS: AtomicU64 = AtomicU64::new(0);
+use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
 
 #[derive(Clone, Debug)]
 pub struct ProgExec<F: Field> {

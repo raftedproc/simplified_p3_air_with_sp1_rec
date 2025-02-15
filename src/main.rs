@@ -129,6 +129,28 @@ fn p3_proof_to_shardproof(
         degree_bits,
     );
 
+    println!(
+        "chip_opened_values.main.local.len() {} {}",
+        chip_opened_values.main.local.len(),
+        chip_opened_values.log_degree,
+    );
+
+    let lengths = chip_opened_values
+        .quotient
+        .iter()
+        .map(|x| x.len())
+        .collect::<Vec<_>>();
+
+    println!(
+        "chip_opened_values.quotinent.len() {} widths {:?}",
+        chip_opened_values.quotient.len(),
+        lengths,
+    );
+
+    println!(
+        "opening_proof.fri_proof.commit_phase_commits.len() 1 {}",
+        opening_proof.fri_proof.commit_phase_commits.len()
+    );
     let shard_proof = ShardProof {
         commitment: ShardCommitment {
             global_main_commit: [BabyBear::zero(); sp1_stark::DIGEST_SIZE].into(),
@@ -144,6 +166,7 @@ fn p3_proof_to_shardproof(
         chip_ordering: HashMap::new(),
         public_values: vec![],
     };
+
     shard_proof
 }
 
@@ -163,6 +186,9 @@ pub struct Cli {
 
     #[arg(short, long, default_value_t = 1)]
     repetitions: u16,
+
+    #[arg(long, default_value_t = false)]
+    recursive: bool,
 }
 
 fn main() -> Result<(), VerificationError> {
@@ -211,6 +237,12 @@ fn main() -> Result<(), VerificationError> {
 
     let p3_proof = prove(&config, &prox_exec, &mut challenger, trace, &vec![]);
 
+    //  println!(
+    //     "proof.fri_proof.commit_phase_commits.len() 3 {} self.fri.log_blowup {}",
+    //     p3_proof.opening_proof.fri_proof.commit_phase_commits.len(),
+    //     config.pcs().fri.log_blowup
+    // );
+
     let mut challenger = InnerChallenger::new(perm.clone());
     verify(&config, &prox_exec, &mut challenger, &p3_proof, &vec![])?;
 
@@ -219,14 +251,11 @@ fn main() -> Result<(), VerificationError> {
     //     serde_json::to_string_pretty(&p3_proof).unwrap()
     // );
 
-    let prover = SP1Prover::<DefaultProverComponents>::new();
-    let opts = SP1ProverOpts::default();
-
-    let core_proofdata = get_sp1_core_proofdata(p3_proof);
-    let vk: StarkVerifyingKey<BabyBearPoseidon2> = dummy_vk();
     let log_quotient_degree = get_log_quotient_degree(&prox_exec, 0, 0);
+    println!("main log_quotient_degree {}", log_quotient_degree);
     // Need to reduce a number of chips created down to 1
-    let chip = Chip::new_(prox_exec.clone(), log_quotient_degree);
+    // log_quotinent_degree is 4 for recursive and 1 for non-recursive
+    let chip = Chip::new_(prox_exec, log_quotient_degree);
     let chips = vec![chip];
     let machine: StarkMachine<BabyBearPoseidon2, ProgExec<BabyBear>> = StarkMachine::new(
         BabyBearPoseidon2::new(),
@@ -235,42 +264,57 @@ fn main() -> Result<(), VerificationError> {
         false,
     );
 
-    let machine_proof = MachineProof {
-        shard_proofs: core_proofdata.0.to_vec(),
-    };
-    let mut challenger = InnerChallenger::new(perm.clone());
-    let chip = &machine.chips()[0];
-    machine
-        .verify_(&vk, &machine_proof, chip, &mut challenger)
-        .unwrap();
+    let prover = SP1Prover::<DefaultProverComponents>::new();
+    let opts = SP1ProverOpts::default();
 
-    // prover.verify_(&core_proofdata, &chip, &sp1vk).unwrap();
+    if cli.recursive {
+        let shard_proof = p3_proof_to_shardproof(p3_proof);
+        // println!(
+        //     "shard_proof.opening_proof.proof_queries {}",
+        //     serde_json::to_string_pretty(&shard_proof.opening_proof).unwrap(),
+        // );
+        let outer_proof = prover.wrap_bn254_(shard_proof, opts, &machine).unwrap();
 
-    // let outer_proof = prover.wrap_bn254_(shard_proof, opts).unwrap();
+        // println!(
+        //     "wrapped_bn254 {:?}",
+        //     serde_json::to_string(&outer_proof.proof).unwrap().len()
+        // );
 
-    // println!(
-    //     "wrapped_bn254 {:?}",
-    //     serde_json::to_string(&outer_proof.proof).unwrap().len()
-    // );
+        let groth16_bn254_artifacts = if sp1_prover::build::sp1_dev_mode() {
+            sp1_prover::build::try_build_groth16_bn254_artifacts_dev(
+                &outer_proof.vk,
+                &outer_proof.proof,
+            )
+        } else {
+            sp1_sdk::install::try_install_circuit_artifacts("groth16")
+        };
 
-    // let groth16_bn254_artifacts = if sp1_prover::build::sp1_dev_mode() {
-    //     sp1_prover::build::try_build_groth16_bn254_artifacts_dev(
-    //         &outer_proof.vk,
-    //         &outer_proof.proof,
-    //     )
-    // } else {
-    //     sp1_sdk::install::try_install_circuit_artifacts("groth16")
-    // };
+        // let groth16_bn254_artifacts = sp1_sdk::install::try_install_circuit_artifacts("groth16");
 
-    // let groth16_bn254_artifacts = sp1_sdk::install::try_install_circuit_artifacts("groth16");
+        let wrapped_bn254_proof: sp1_prover::Groth16Bn254Proof =
+            prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+        // let mut file = File::create("groth16.proof").expect("Could not create file!");
+        // file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
+        //     .expect("Cannot write to the file!");
 
-    // let wrapped_bn254_proof: sp1_prover::Groth16Bn254Proof = prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-    // let mut file = File::create("groth16.proof").expect("Could not create file!");
-    // file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
-    //     .expect("Cannot write to the file!");
+        // // vk from the initial setup
+        prover
+            .verify_groth16_bn254_(&wrapped_bn254_proof, &groth16_bn254_artifacts)
+            .unwrap();
+    } else {
+        let core_proofdata = get_sp1_core_proofdata(p3_proof);
+        let vk: StarkVerifyingKey<BabyBearPoseidon2> = dummy_vk();
 
-    // // vk from the initial setup
-    // prover.verify_groth16_bn254_(&wrapped_bn254_proof,  &groth16_bn254_artifacts).unwrap();
+        let machine_proof = MachineProof {
+            shard_proofs: core_proofdata.0.to_vec(),
+        };
+        let mut challenger = InnerChallenger::new(perm.clone());
+        let chip = &machine.chips()[0];
+        machine
+            .verify_(&vk, &machine_proof, chip, &mut challenger)
+            .unwrap();
+        // prover.verify_(&core_proofdata, &chip, &sp1vk).unwrap();
+    }
 
     Ok(())
 }
