@@ -293,9 +293,9 @@ fn main() -> Result<(), VerificationError> {
 
         let wrapped_bn254_proof: sp1_prover::Groth16Bn254Proof =
             prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-        // let mut file = File::create("groth16.proof").expect("Could not create file!");
-        // file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
-        //     .expect("Cannot write to the file!");
+        let mut file = File::create("groth16.proof").expect("Could not create file!");
+        file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
+            .expect("Cannot write to the file!");
 
         // // vk from the initial setup
         prover
