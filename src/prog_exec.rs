@@ -2,12 +2,29 @@ use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::AbstractField;
 use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use sha2::{Digest, Sha256};
 use sp1_core_executor::{ExecutionRecord, Program};
 use sp1_stark::air::MachineAir;
 
 use crate::math_ops::{no_op, MathOpFirstRow};
 use crate::stark_primitives::LEFT_ARG;
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
+
+pub fn dummy_32b_public_values(seed: u8) -> [u8; 32] {
+    let mut public_values = [seed; 32];
+    for i in 16..32 {
+        public_values[i] = seed+1;
+    }
+    public_values
+}
+
+pub fn dummy_public_values_hash(global_nonce: &[u8; 32], local_nonce: &[u8; 32], hash_value: &[u8; 32]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(global_nonce);
+    hasher.update(local_nonce);
+    hasher.update(hash_value);
+    hasher.finalize().into()
+}
 
 pub fn to_field_values<F: p3_field::Field>(values: &[u8]) -> Vec<F> {
     values.iter().map(|&b| F::from_canonical_u8(b)).collect()
@@ -17,7 +34,9 @@ pub fn to_field_values<F: p3_field::Field>(values: &[u8]) -> Vec<F> {
 pub struct ProgExec<F: Field> {
     pub ops: Vec<I64MathOp<F>>,
     pub regs: RegFile,
-    pub public_values: Vec<u8>,
+    pub global_nonce: [u8;32],
+    pub local_nonce: [u8;32],
+    pub hash_value: [u8;32],
 }
 
 // This is a row size of a state representation.
@@ -56,16 +75,13 @@ pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> Ro
     let next_pow_of_2 = num_of_ops.next_power_of_two();
     let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * next_pow_of_2);
 
-    // let public_values = [F::from_canonical_u64(42); 32];
-    // let mut first_row = MathOpFirstRow::new(public_values).consume_as_vec();
+    let public_values: Vec<F> = to_field_values(&dummy_public_values_hash(&prog.global_nonce, &prog.local_nonce, &prog.hash_value));
+    let public_values_array = public_values.try_into().expect("must be 32 bytes");
+    let mut first_row = MathOpFirstRow::new(public_values_array).consume_as_vec();
     // let first_row = vec![F::zero(); BIN_OP_ROW_SIZE];
-    // println!("generate_program_trace first_row {:?}", first_row);
+    println!("generate_program_trace first_row len {}", first_row.len());
 
-    // values.append(&mut first_row);
-    let mut first_row = vec![F::zero(); LEFT_ARG-1];
-    let orig_public_values = vec![0x42u8;32];
-    let public_values: Vec<F> = to_field_values(&orig_public_values);
-    first_row.extend(public_values);
+    values.append(&mut first_row); 
 
     println!("generate_program_trace first_row {:?}", first_row);
     values.append(&mut first_row);
@@ -75,7 +91,7 @@ pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> Ro
 
     for _ in 0..cli.programs {
         for _ in 0..cli.repetitions {
-            for (i, op) in prog.ops.iter_mut().enumerate() {
+            for op in prog.ops.iter_mut() {
                 let mut next_record = op.generate(&mut prog.regs, &mut values);
                 values.append(&mut next_record);
             }

@@ -23,7 +23,6 @@ impl<F: Field> MathOpFirstRow<F> {
     pub fn new(public_values_sha256: [F; 32]) -> MathOpFirstRow<F> {
         let cnt = F::zero();
         let flags = [F::zero(); LEFT_ARG - 2];
-        // let flags = orig_flags[0..10];
         MathOpFirstRow {
             cnt,
             flags,

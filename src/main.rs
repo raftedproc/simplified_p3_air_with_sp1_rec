@@ -3,6 +3,7 @@ mod prog_exec;
 mod register;
 mod stark_primitives;
 
+use ff::derive::bitvec::vec;
 use hashbrown::HashMap;
 use p3_field::extension::BinomialExtensionField;
 use serde::de;
@@ -26,7 +27,7 @@ use sp1_stark::{
 use std::io::Write;
 
 use p3_uni_stark::{get_log_quotient_degree, prove, verify, OpenedValues, VerificationError};
-use prog_exec::{generate_program_trace, to_field_values, ProgExec};
+use prog_exec::{dummy_32b_public_values, dummy_public_values_hash, generate_program_trace, to_field_values, ProgExec};
 use register::init_regs;
 
 use tracing_forest::util::LevelFilter;
@@ -39,6 +40,7 @@ use stark_primitives::{InnerBabyBearPoseidon2, P3Proof, BIN_OP_ROW_SIZE};
 
 // type BabyBearExtentionField = ExtensionField<BabyBear>;
 use p3_field::ExtensionField;
+
 
 fn dummy_vk() -> StarkVerifyingKey<BabyBearPoseidon2> {
     let chips = vec![
@@ -179,7 +181,6 @@ fn get_sp1_core_proofdata(
     SP1CoreProofData(shard_proofs)
 }
 
-
 #[derive(Parser)]
 pub struct Cli {
     #[arg(short, long, default_value_t = 1)]
@@ -191,6 +192,7 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     recursive: bool,
 }
+
 
 fn main() -> Result<(), VerificationError> {
     let cli = Cli::parse();
@@ -227,21 +229,25 @@ fn main() -> Result<(), VerificationError> {
     }
 
     let ops_len = ops.len();
-    let orig_public_values = vec![0x42u8;32];
+    let global_nonce = dummy_32b_public_values(42);
+    let local_nonce = dummy_32b_public_values(43);
+    let hash_value = dummy_32b_public_values(44);
     let mut prox_exec = ProgExec {
         ops,
         regs,
-        public_values: orig_public_values.clone(),
+        global_nonce,
+        local_nonce,
+        hash_value,
     };
     let trace = generate_program_trace(&mut prox_exec, &cli);
-    let trace_len = trace.values.len() / trace.width;
+    // let trace_len = trace.values.len() / trace.width;
 
     let perm = inner_perm();
     let mut challenger = InnerChallenger::new(perm.clone());
     let inner = BabyBearPoseidon2Inner::default();
     let config = InnerBabyBearPoseidon2::new(inner.pcs);
 
-    let public_values = to_field_values(&orig_public_values);
+    let public_values = to_field_values(&dummy_public_values_hash(&global_nonce, &local_nonce, &hash_value));
     // let public_values = vec![];
     let p3_proof = prove(&config, &prox_exec, &mut challenger, trace, &public_values);
 
@@ -355,7 +361,7 @@ fn main() -> Result<(), VerificationError> {
         let chip = &machine.chips()[0];
         machine
             .verify_(&vk, &machine_proof, chip, &mut challenger)
-            .unwrap();
+            .expect("Chip verification result must be Ok");
         // prover.verify_(&core_proofdata, &chip, &sp1vk).unwrap();
     }
 
