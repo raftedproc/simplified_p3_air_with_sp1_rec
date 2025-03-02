@@ -1,0 +1,8 @@
+[submodule "Plonky3"]
+	path = Plonky3
+	url = https://github.com/fluencelabs/Plonky3.git
+	branch = fluence-sp1-v4
+[submodule "sp1"]
+	path = sp1
+	url = https://github.com/fluencelabs/sp1.git
+	branch = fluence-v3.3.0
