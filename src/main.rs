@@ -12,7 +12,7 @@ use sp1_stark::baby_bear_poseidon2::BabyBearPoseidon2;
 use std::fs::File;
 
 use clap::Parser;
-use math_ops::{test_add, test_sub};
+use math_ops::{add_op, sub_op};
 use p3_baby_bear::BabyBear;
 use p3_field::AbstractField;
 use sp1_prover::components::DefaultProverComponents;
@@ -25,10 +25,8 @@ use sp1_stark::{
 
 use std::io::Write;
 
-use p3_uni_stark::{
-    get_log_quotient_degree, prove, verify, OpenedValues, StarkGenericConfig, VerificationError,
-};
-use prog_exec::{generate_program_trace, ProgExec};
+use p3_uni_stark::{get_log_quotient_degree, prove, verify, OpenedValues, VerificationError};
+use prog_exec::{generate_program_trace, to_field_values, ProgExec};
 use register::init_regs;
 
 use tracing_forest::util::LevelFilter;
@@ -114,6 +112,7 @@ fn convert_opened_values_<F: p3_field::Field, EF: ExtensionField<F>>(
 // fn p3_proof_to_shardproof<SC: sp1_stark::StarkGenericConfig>(
 fn p3_proof_to_shardproof(
     p3_proof: P3Proof,
+    public_values: Vec<BabyBear>,
     // air: ProgExec<BabyBear>,
 ) -> ShardProof<sp1_stark::baby_bear_poseidon2::BabyBearPoseidon2> {
     // let shape = ProofShape { chip_information: vec![("p3_stark".to_string(), 42)] };
@@ -164,7 +163,7 @@ fn p3_proof_to_shardproof(
         },
         opening_proof,
         chip_ordering: HashMap::new(),
-        public_values: vec![],
+        public_values,
     };
 
     shard_proof
@@ -172,12 +171,14 @@ fn p3_proof_to_shardproof(
 
 fn get_sp1_core_proofdata(
     p3_proof: P3Proof,
+    public_values: Vec<BabyBear>,
     /*air: ProgExec<BabyBear>*/
 ) -> SP1CoreProofData {
-    let shard_proof = p3_proof_to_shardproof(p3_proof);
+    let shard_proof = p3_proof_to_shardproof(p3_proof, public_values);
     let shard_proofs = vec![shard_proof];
     SP1CoreProofData(shard_proofs)
 }
+
 
 #[derive(Parser)]
 pub struct Cli {
@@ -203,8 +204,8 @@ fn main() -> Result<(), VerificationError> {
         .with(ForestLayer::default())
         .init();
 
-    let add_op = test_add();
-    let sub_op = test_sub();
+    let add_op = add_op();
+    let sub_op = sub_op();
 
     let regs_num = 2;
     let mut regs = init_regs(regs_num);
@@ -226,7 +227,12 @@ fn main() -> Result<(), VerificationError> {
     }
 
     let ops_len = ops.len();
-    let mut prox_exec = ProgExec { ops, regs };
+    let orig_public_values = vec![0x42u8;32];
+    let mut prox_exec = ProgExec {
+        ops,
+        regs,
+        public_values: orig_public_values.clone(),
+    };
     let trace = generate_program_trace(&mut prox_exec, &cli);
     let trace_len = trace.values.len() / trace.width;
 
@@ -235,7 +241,9 @@ fn main() -> Result<(), VerificationError> {
     let inner = BabyBearPoseidon2Inner::default();
     let config = InnerBabyBearPoseidon2::new(inner.pcs);
 
-    let p3_proof = prove(&config, &prox_exec, &mut challenger, trace, &vec![]);
+    let public_values = to_field_values(&orig_public_values);
+    // let public_values = vec![];
+    let p3_proof = prove(&config, &prox_exec, &mut challenger, trace, &public_values);
 
     //  println!(
     //     "proof.fri_proof.commit_phase_commits.len() 3 {} self.fri.log_blowup {}",
@@ -244,7 +252,14 @@ fn main() -> Result<(), VerificationError> {
     // );
 
     let mut challenger = InnerChallenger::new(perm.clone());
-    verify(&config, &prox_exec, &mut challenger, &p3_proof, &vec![])?;
+    // let public_values = to_field_values(&[0u8; 32]);
+    verify(
+        &config,
+        &prox_exec,
+        &mut challenger,
+        &p3_proof,
+        &public_values,
+    )?;
 
     // println!(
     //     "p3_proof {}",
@@ -268,7 +283,7 @@ fn main() -> Result<(), VerificationError> {
     let opts = SP1ProverOpts::default();
 
     if cli.recursive {
-        let shard_proof = p3_proof_to_shardproof(p3_proof);
+        let shard_proof = p3_proof_to_shardproof(p3_proof, public_values);
         // println!(
         //     "shard_proof.opening_proof.proof_queries {}",
         //     serde_json::to_string_pretty(&shard_proof.opening_proof).unwrap(),
@@ -293,16 +308,44 @@ fn main() -> Result<(), VerificationError> {
 
         let wrapped_bn254_proof: sp1_prover::Groth16Bn254Proof =
             prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-        let mut file = File::create("groth16.proof").expect("Could not create file!");
-        file.write_all(serde_json::to_string_pretty(&wrapped_bn254_proof).unwrap().as_bytes())
-            .expect("Cannot write to the file!");
+        // let mut file = File::create("groth16.proof").expect("Could not create file!");
+        // file.write_all(
+        //     serde_json::to_string_pretty(&wrapped_bn254_proof)
+        //         .unwrap()
+        //         .as_bytes(),
+        // )
+        // .expect("Cannot write to the file!");
 
-        // // vk from the initial setup
+        // let sp1_prover::Groth16Bn254Proof {
+        //     public_inputs,
+        //     mut encoded_proof,
+        //     mut raw_proof,
+        //     groth16_vkey_hash,
+        // } = wrapped_bn254_proof;
+
+        // unsafe {
+        //     encoded_proof.as_bytes_mut()[0] = 0x01;
+        // }
+
+        // unsafe {
+        //     raw_proof.as_bytes_mut()[0] = 0x01;
+        // }
+
+        // let wrapped_bn254_proof = sp1_prover::Groth16Bn254Proof {
+        //     public_inputs,
+        //     encoded_proof,
+        //     raw_proof,
+        //     groth16_vkey_hash,
+        // };
+
+        println!("encoded_proof 2 {}", wrapped_bn254_proof.encoded_proof);
+        println!("raw_proof 2 {}", wrapped_bn254_proof.raw_proof);
+        // vk from the initial setup
         prover
             .verify_groth16_bn254_(&wrapped_bn254_proof, &groth16_bn254_artifacts)
             .unwrap();
     } else {
-        let core_proofdata = get_sp1_core_proofdata(p3_proof);
+        let core_proofdata = get_sp1_core_proofdata(p3_proof, public_values);
         let vk: StarkVerifyingKey<BabyBearPoseidon2> = dummy_vk();
 
         let machine_proof = MachineProof {

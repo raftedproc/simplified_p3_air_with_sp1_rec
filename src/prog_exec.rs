@@ -1,16 +1,23 @@
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
+use p3_field::AbstractField;
 use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_field::AbstractField;
 use sp1_core_executor::{ExecutionRecord, Program};
 use sp1_stark::air::MachineAir;
 
+use crate::math_ops::{no_op, MathOpFirstRow};
+use crate::stark_primitives::LEFT_ARG;
 use crate::{math_ops::I64MathOp, register::RegFile, stark_primitives::BIN_OP_ROW_SIZE, Cli};
+
+pub fn to_field_values<F: p3_field::Field>(values: &[u8]) -> Vec<F> {
+    values.iter().map(|&b| F::from_canonical_u8(b)).collect()
+}
 
 #[derive(Clone, Debug)]
 pub struct ProgExec<F: Field> {
     pub ops: Vec<I64MathOp<F>>,
     pub regs: RegFile,
+    pub public_values: Vec<u8>,
 }
 
 // This is a row size of a state representation.
@@ -21,46 +28,99 @@ impl<F: Field> BaseAir<F> for ProgExec<F> {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for ProgExec<AB::F> {
+impl<AB: AirBuilder + AirBuilderWithPublicValues> Air<AB> for ProgExec<AB::F> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.row_slice(0);
         let next = main.row_slice(1);
 
+        // Use borrow trait for a FirstRow?
+        let pub_values = builder.public_values().to_vec();
+        // let local_pub_values = pub_values.clone();
+        let mut when_first_row = builder.when_first_row();
+        for (i, pub_value) in pub_values.iter().enumerate() {
+            when_first_row.assert_eq(*pub_value, local[i + LEFT_ARG-1]);
+        }
+
         builder
             .when_transition()
             .assert_eq(next[0], local[0] + AB::Expr::one());
+
+        let op = I64MathOp::default();
+        op.eval(builder);
     }
 }
 
 pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> RowMajorMatrix<F> {
-    let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * prog.ops.len() * cli.repetitions as usize * cli.programs as usize);
+    let num_of_ops = prog.ops.len() * cli.repetitions as usize * cli.programs as usize + 1;
+    let next_pow_of_2 = num_of_ops.next_power_of_two();
+    let mut values = Vec::with_capacity(BIN_OP_ROW_SIZE * next_pow_of_2);
+
+    // let public_values = [F::from_canonical_u64(42); 32];
+    // let mut first_row = MathOpFirstRow::new(public_values).consume_as_vec();
+    // let first_row = vec![F::zero(); BIN_OP_ROW_SIZE];
+    // println!("generate_program_trace first_row {:?}", first_row);
+
+    // values.append(&mut first_row);
+    let mut first_row = vec![F::zero(); LEFT_ARG-1];
+    let orig_public_values = vec![0x42u8;32];
+    let public_values: Vec<F> = to_field_values(&orig_public_values);
+    first_row.extend(public_values);
+
+    println!("generate_program_trace first_row {:?}", first_row);
+    values.append(&mut first_row);
+    prog.regs.cnt += 1;
+
+    // println!("generate_program_trace first_row {:?}", values);
 
     for _ in 0..cli.programs {
         for _ in 0..cli.repetitions {
-            for op in prog.ops.iter_mut() {
-                    let mut next_record = op.generate(&mut prog.regs, &mut values);
-                    values.append(&mut next_record);
+            for (i, op) in prog.ops.iter_mut().enumerate() {
+                let mut next_record = op.generate(&mut prog.regs, &mut values);
+                values.append(&mut next_record);
             }
         }
     }
-    
+
+    // find the next power of 2 and fill up the Matrix with NoOps up to the next pow of 2
+    fill_up_with_no_ops(&mut values, &mut prog.regs);
+
+    println!(
+        "generate_program_trace values.len() {:?}  rows {}",
+        values.len(),
+        values.len() / BIN_OP_ROW_SIZE
+    );
     RowMajorMatrix::new(values, BIN_OP_ROW_SIZE)
+}
+
+fn fill_up_with_no_ops<F: Field>(values: &mut Vec<F>, reg_file: &mut RegFile) {
+    let actual_num_of_ops = values.len() / BIN_OP_ROW_SIZE;
+    let next_pow_of_2 = actual_num_of_ops.next_power_of_two();
+    let mut no_op = no_op();
+
+    for _ in actual_num_of_ops..next_pow_of_2 {
+        let mut next_record = no_op.generate(reg_file, values);
+        values.append(&mut next_record);
+    }
 }
 
 impl<F: PrimeField> MachineAir<F> for ProgExec<F> {
     type Record = ExecutionRecord;
 
     type Program = Program;
-    
+
     fn name(&self) -> String {
         "ProgExec".to_string()
     }
-    
-    fn generate_trace(&self, _input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
+
+    fn generate_trace(
+        &self,
+        _input: &Self::Record,
+        _output: &mut Self::Record,
+    ) -> RowMajorMatrix<F> {
         todo!()
     }
-    
+
     fn included(&self, _shard: &Self::Record) -> bool {
         todo!()
     }
@@ -68,5 +128,4 @@ impl<F: PrimeField> MachineAir<F> for ProgExec<F> {
     fn preprocessed_width(&self) -> usize {
         BIN_OP_ROW_SIZE
     }
-
 }
