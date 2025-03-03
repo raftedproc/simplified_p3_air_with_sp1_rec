@@ -57,8 +57,10 @@ impl<AB: AirBuilder + AirBuilderWithPublicValues> Air<AB> for ProgExec<AB::F> {
         let pub_values = builder.public_values().to_vec();
         // let local_pub_values = pub_values.clone();
         let mut when_first_row = builder.when_first_row();
-        for (i, pub_value) in pub_values.iter().enumerate() {
-            when_first_row.assert_eq(*pub_value, local[i + LEFT_ARG-1]);
+        // WIP hardcode
+        println!("public_values len {}", pub_values.len());
+        for i in 0..pub_values.len().min(32usize) {
+            when_first_row.assert_eq(pub_values[i], local[i + LEFT_ARG-1]);
         }
 
         builder
@@ -83,8 +85,8 @@ pub fn generate_program_trace<F: Field>(prog: &mut ProgExec<F>, cli: &Cli) -> Ro
 
     values.append(&mut first_row); 
 
-    println!("generate_program_trace first_row {:?}", first_row);
-    values.append(&mut first_row);
+    // println!("generate_program_trace first_row {:?}", first_row);
+    // values.append(&mut first_row);
     prog.regs.cnt += 1;
 
     // println!("generate_program_trace first_row {:?}", values);
