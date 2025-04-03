@@ -345,6 +345,7 @@ fn main() -> Result<(), VerificationError> {
         println!("encoded_proof 2 {}", wrapped_bn254_proof.encoded_proof);
         println!("raw_proof 2 {}", wrapped_bn254_proof.raw_proof);
         println!("public_inputs {:?}", wrapped_bn254_proof.public_inputs);
+        println!("main() public_values {:?}", public_values);
         // vk from the initial setup
         let sp1_public_values = SP1PublicValues::from(&public_values);
         println!("public_values {}", sp1_public_values.raw());
