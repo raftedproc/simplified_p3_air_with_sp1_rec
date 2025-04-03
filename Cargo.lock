@@ -3627,6 +3627,7 @@ dependencies = [
  "sp1-core-machine",
  "sp1-primitives",
  "sp1-prover",
+ "sp1-recursion-core",
  "sp1-sdk",
  "sp1-stark",
  "tracing-forest",

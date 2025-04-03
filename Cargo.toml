@@ -101,6 +101,7 @@ sp1-prover = { version = "3.3.0", path = "./sp1/crates/prover" }
 sp1-core-executor = { version = "3.3.0", path = "./sp1/crates/core/executor" }
 sp1-core-machine = { version = "3.3.0", path = "./sp1/crates/core/machine" }
 sp1-sdk = { version = "3.3.0", path = "./sp1/crates/sdk" }
+sp1-recursion-core = { version = "3.3.0", path = "./sp1/crates/recursion/core" }
 
 tracing-subscriber = { version = "0.3.17", features = ["std", "env-filter"] }
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
